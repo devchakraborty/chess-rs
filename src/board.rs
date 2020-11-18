@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 use unicode_segmentation::UnicodeSegmentation;
 
 const FILE_CHARS: &'static str = "abcdefgh";
@@ -22,8 +21,8 @@ pub enum Kind {
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct Location {
-    rank: u8,
-    file: u8,
+    pub rank: u8,
+    pub file: u8,
 }
 
 impl Location {
@@ -51,6 +50,14 @@ impl Location {
         return self.move_relative(color, 1, 0);
     }
 
+    fn left(&self, color: Color) -> Option<Self> {
+        return self.move_relative(color, 0, -1);
+    }
+
+    fn right(&self, color: Color) -> Option<Self> {
+        return self.move_relative(color, 0, 1);
+    }
+
     fn pgn(&self) -> String {
         return format!(
             "{}{}",
@@ -70,43 +77,9 @@ pub struct Diff {
     new_kind: Option<Kind>,
 }
 
-impl fmt::Display for Diff {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut result: String = String::new();
-        if let Some(from_loc) = self.from {
-            result = format!("{}[from {}]", result, from_loc.pgn());
-        }
-        if let Some(to_loc) = self.to {
-            result = format!("{}[to {}]", result, to_loc.pgn());
-        }
-        if let Some(new_kind) = &self.new_kind {
-            result = format!("{}[as {:?}]", result, new_kind);
-        }
-        write!(f, "{}", result)
-    }
-}
-
 #[derive(Debug)]
-pub struct Move {
-    diffs: Vec<Diff>,
-}
-
-impl Move {
-    fn simple(from: Location, to: Location) -> Move {
-        return Move {
-            diffs: vec![Diff {
-                from: Some(from),
-                to: Some(to),
-                new_kind: None,
-            }],
-        };
-    }
-}
-
-impl fmt::Display for Move {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<{:?}>", self.diffs)
-    }
+pub enum Move {
+    Simple(Location, Location),
 }
 
 pub trait Piece {
@@ -150,31 +123,37 @@ impl Piece for Pawn {
     }
 
     fn possible_moves(&self, board: &Board) -> Vec<Move> {
-        println!("pawn moves");
         let mut result = vec![];
         if let Some(forward1) = self.location.forward(self.color) {
-            println!("has forward 1");
             if let None = board.get_piece(&forward1) {
-                println!("forward 1 unoccupied");
                 if let Some(forward2) = forward1.forward(self.color) {
                     if let None = board.get_piece(&forward2) {
                         result.append(&mut vec![
-                            Move::simple(self.location, forward1),
-                            Move::simple(self.location, forward2),
+                            Move::Simple(self.location, forward1),
+                            Move::Simple(self.location, forward2),
                         ]);
                     } else {
-                        result.append(&mut vec![Move::simple(self.location, forward1)]);
+                        result.push(Move::Simple(self.location, forward1));
                     }
                 } else {
-                    result.append(&mut vec![Move::simple(self.location, forward1)]);
+                    result.push(Move::Simple(self.location, forward1));
                 }
-            } else {
-                println!("forward 1 occupied");
-                println!(
-                    "forward 1 loc: {:?} {:?}",
-                    self.location.pgn(),
-                    forward1.pgn()
-                );
+            }
+
+            if let Some(capture_left1) = forward1.left(self.color) {
+                if let Some(capture_left_piece1) = board.get_piece(&capture_left1) {
+                    if capture_left_piece1.color() != self.color {
+                        result.push(Move::Simple(self.location, capture_left1));
+                    }
+                }
+            }
+
+            if let Some(capture_right1) = forward1.right(self.color) {
+                if let Some(capture_right_piece1) = board.get_piece(&capture_right1) {
+                    if capture_right_piece1.color() != self.color {
+                        result.push(Move::Simple(self.location, capture_right1));
+                    }
+                }
             }
         }
         return result;
@@ -220,7 +199,29 @@ impl Piece for Knight {
     }
 
     fn possible_moves(&self, board: &Board) -> Vec<Move> {
-        return vec![];
+        let mut result: Vec<Move> = vec![];
+        let offsets: [(i8, i8); 8] = [
+            (1, 2),
+            (2, 1),
+            (2, -1),
+            (1, -2),
+            (-1, -2),
+            (-2, -1),
+            (-2, 1),
+            (-1, 2),
+        ];
+        for offset in offsets.iter() {
+            if let Some(location) = self.location.move_relative(self.color, offset.0, offset.1) {
+                if let Some(piece) = board.get_piece(&location) {
+                    if piece.color() != self.color {
+                        result.push(Move::Simple(self.location, location));
+                    }
+                } else {
+                    result.push(Move::Simple(self.location, location));
+                }
+            }
+        }
+        return result;
     }
 
     fn repr(&self) -> &str {
@@ -429,17 +430,14 @@ pub struct Board {
 
 impl Board {
     pub fn new() -> Self {
-        let mut board = Board {
+        return Board {
             pieces: HashMap::new(),
             to_move: Color::White,
         };
-        return board;
     }
 
     fn add_piece(&mut self, piece: Box<dyn Piece>) {
-        assert!(!self.pieces.contains_key(&piece.as_ref().location()));
         self.pieces.insert(piece.as_ref().location(), piece);
-        println!("{} pieces", self.pieces.len());
     }
 
     fn remove_piece(&mut self, location: &Location) {
@@ -506,5 +504,21 @@ impl Board {
             }
         }
         return result;
+    }
+    pub fn apply_move(&mut self, r#move: Move) {
+        match r#move {
+            Move::Simple(from, to) => {
+                let mut piece = self
+                    .pieces
+                    .remove(&from)
+                    .expect(&format!("No piece at {}", from.pgn()));
+                piece.set_location(to);
+                self.pieces.insert(to, piece);
+            }
+        }
+        self.to_move = match &self.to_move {
+            Color::Black => Color::White,
+            Color::White => Color::Black,
+        };
     }
 }
