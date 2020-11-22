@@ -1,11 +1,16 @@
 mod board;
 
+use text_io::read;
+
 fn main() {
     let mut board = board::Board::default();
-    board.apply_move(board::Move::Simple(
-        board::Location { rank: 1, file: 4 },
-        board::Location { rank: 3, file: 4 },
-    ));
     print!("{}", board.to_str());
-    print!("{:?}", board.possible_moves());
+
+    loop {
+        let line: String = read!("{}\n");
+        let r#move = board.parse_pgn_move(line.trim());
+        println!("{:?}", r#move);
+        board.apply_move(r#move);
+        print!("{}", board.to_str());
+    }
 }

@@ -1,15 +1,16 @@
+use regex::Regex;
 use std::collections::HashMap;
 use unicode_segmentation::UnicodeSegmentation;
 
 const FILE_CHARS: &'static str = "abcdefgh";
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Color {
     White,
     Black,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Kind {
     King,
     Queen,
@@ -17,6 +18,29 @@ pub enum Kind {
     Bishop,
     Knight,
     Pawn,
+}
+
+fn kind_to_pgn(kind: &Kind) -> String {
+    String::from(match kind {
+        Kind::King => "K",
+        Kind::Queen => "Q",
+        Kind::Rook => "R",
+        Kind::Bishop => "B",
+        Kind::Knight => "N",
+        Kind::Pawn => "",
+    })
+}
+
+fn pgn_to_kind(pgn: &str) -> Kind {
+    match pgn {
+        "K" => Kind::King,
+        "Q" => Kind::Queen,
+        "R" => Kind::Rook,
+        "B" => Kind::Bishop,
+        "N" => Kind::Knight,
+        "" => Kind::Pawn,
+        _ => panic!("Invalid piece kind: {}", pgn),
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
@@ -68,6 +92,27 @@ impl Location {
             self.rank + 1
         );
     }
+
+    fn parse_rank(rank: &str) -> u8 {
+        let result = rank.parse::<u8>().unwrap() - 1;
+        assert!(result >= 0 && result < 8, format!("Invalid rank: {}", rank));
+        return result;
+    }
+
+    fn parse_file(file: &str) -> u8 {
+        assert!(file.len() == 1, format!("Invalid file: {}", file));
+        FILE_CHARS
+            .find(file)
+            .expect(&format!("Invalid file: {}", file)) as u8
+    }
+
+    fn parse_pgn(pgn: &str) -> Location {
+        assert!(pgn.len() == 2, format!("Invalid square: {}", pgn));
+        Location {
+            rank: Location::parse_rank(&pgn[1..2]),
+            file: Location::parse_file(&pgn[0..1]),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -82,7 +127,7 @@ pub enum Move {
     Simple(Location, Location),
 }
 
-pub trait Piece {
+pub trait Piece: core::fmt::Debug {
     fn color(&self) -> Color;
     fn kind(&self) -> Kind;
     fn location(&self) -> Location;
@@ -91,6 +136,7 @@ pub trait Piece {
     fn repr(&self) -> &str;
 }
 
+#[derive(Debug)]
 struct Pawn {
     color: Color,
     location: Location,
@@ -167,6 +213,7 @@ impl Piece for Pawn {
     }
 }
 
+#[derive(Debug)]
 struct Knight {
     color: Color,
     location: Location,
@@ -232,6 +279,7 @@ impl Piece for Knight {
     }
 }
 
+#[derive(Debug)]
 struct Bishop {
     color: Color,
     location: Location,
@@ -264,7 +312,28 @@ impl Piece for Bishop {
     }
 
     fn possible_moves(&self, board: &Board) -> Vec<Move> {
-        return vec![];
+        let directions: [(i8, i8); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+        let mut result: Vec<Move> = vec![];
+
+        for direction in directions.iter() {
+            for distance in 1..8 {
+                if let Some(target_location) = self.location.move_relative(
+                    self.color,
+                    distance * direction.0,
+                    distance * direction.1,
+                ) {
+                    if let Some(target_piece) = board.get_piece(&target_location) {
+                        if target_piece.color() != self.color {
+                            result.push(Move::Simple(self.location, target_location));
+                        }
+                        break;
+                    } else {
+                        result.push(Move::Simple(self.location, target_location));
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     fn repr(&self) -> &str {
@@ -275,6 +344,7 @@ impl Piece for Bishop {
     }
 }
 
+#[derive(Debug)]
 struct Rook {
     color: Color,
     location: Location,
@@ -307,7 +377,28 @@ impl Piece for Rook {
     }
 
     fn possible_moves(&self, board: &Board) -> Vec<Move> {
-        return vec![];
+        let directions: [(i8, i8); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
+        let mut result: Vec<Move> = vec![];
+
+        for direction in directions.iter() {
+            for distance in 1..8 {
+                if let Some(target_location) = self.location.move_relative(
+                    self.color,
+                    distance * direction.0,
+                    distance * direction.1,
+                ) {
+                    if let Some(target_piece) = board.get_piece(&target_location) {
+                        if target_piece.color() != self.color {
+                            result.push(Move::Simple(self.location, target_location));
+                        }
+                        break;
+                    } else {
+                        result.push(Move::Simple(self.location, target_location));
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     fn repr(&self) -> &str {
@@ -318,6 +409,7 @@ impl Piece for Rook {
     }
 }
 
+#[derive(Debug)]
 struct Queen {
     color: Color,
     location: Location,
@@ -350,7 +442,37 @@ impl Piece for Queen {
     }
 
     fn possible_moves(&self, board: &Board) -> Vec<Move> {
-        return vec![];
+        let directions: [(i8, i8); 8] = [
+            (0, 1),
+            (1, 0),
+            (0, -1),
+            (-1, 0),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
+        ];
+        let mut result: Vec<Move> = vec![];
+
+        for direction in directions.iter() {
+            for distance in 1..8 {
+                if let Some(target_location) = self.location.move_relative(
+                    self.color,
+                    distance * direction.0,
+                    distance * direction.1,
+                ) {
+                    if let Some(target_piece) = board.get_piece(&target_location) {
+                        if target_piece.color() != self.color {
+                            result.push(Move::Simple(self.location, target_location));
+                        }
+                        break;
+                    } else {
+                        result.push(Move::Simple(self.location, target_location));
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     fn repr(&self) -> &str {
@@ -361,6 +483,7 @@ impl Piece for Queen {
     }
 }
 
+#[derive(Debug)]
 struct King {
     color: Color,
     location: Location,
@@ -520,5 +643,81 @@ impl Board {
             Color::Black => Color::White,
             Color::White => Color::Black,
         };
+    }
+
+    pub fn to_pgn(&self, r#move: &Move) -> String {
+        match r#move {
+            Move::Simple(from, to) => {
+                if let Some(move_piece) = self.get_piece(from) {
+                    let mut result = String::new();
+                    result.push_str(&kind_to_pgn(&move_piece.as_ref().kind()));
+                    result.push_str(&to.pgn());
+                    return result;
+                } else {
+                    panic!("No piece at {}", from.pgn());
+                }
+            }
+        }
+    }
+
+    pub fn parse_pgn_move(&self, pgn: &str) -> Move {
+        let simple_re: Regex = Regex::new(r"^([NBRQK]?)([a-h]?)([1-8]?)x?([a-h][1-8])$").unwrap();
+        if simple_re.is_match(pgn) {
+            let cap = simple_re.captures_iter(pgn).next().expect("");
+            let kind = pgn_to_kind(&cap[1]);
+            let source_file: Option<u8> = match &cap[2] {
+                "" => None,
+                file_char => Some(FILE_CHARS.find(file_char).expect("") as u8),
+            };
+            let source_rank: Option<u8> = match &cap[3] {
+                "" => None,
+                rank_char => Some(rank_char.parse::<u8>().unwrap() - 1),
+            };
+            let dest_loc = Location::parse_pgn(&cap[4]);
+            let mut candidate_pieces: Vec<&Box<dyn Piece>> = vec![];
+            for (_, piece) in &self.pieces {
+                if piece.color() != self.to_move {
+                    continue;
+                }
+                if piece.kind() != kind {
+                    continue;
+                }
+                if let Some(from_file) = source_file {
+                    if from_file != piece.location().file {
+                        continue;
+                    }
+                }
+                if let Some(from_rank) = source_rank {
+                    if from_rank != piece.location().rank {
+                        continue;
+                    }
+                }
+                let mut can_move = false;
+                for r#move in piece.possible_moves(self) {
+                    if let Move::Simple(from, to) = r#move {
+                        if to == dest_loc {
+                            can_move = true;
+                            break;
+                        }
+                    }
+                }
+                if !can_move {
+                    continue;
+                }
+                candidate_pieces.push(piece);
+            }
+            println!("{:?}", candidate_pieces);
+            assert!(
+                candidate_pieces.len() > 0,
+                format!("No pieces can make the move: {}", pgn)
+            );
+            assert!(
+                candidate_pieces.len() == 1,
+                format!("Move is ambiguous: {}", pgn)
+            );
+            let move_piece = candidate_pieces[0];
+            return Move::Simple(move_piece.location(), dest_loc);
+        }
+        panic!("Could not parse move: {}", pgn);
     }
 }
